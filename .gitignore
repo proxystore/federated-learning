@@ -1,0 +1,9 @@
+.idea/
+data/
+
+__pycache__/
+.DS_Store
+
+# Ignore any data store made for ProxyStore functionality.
+*.rdb
+
