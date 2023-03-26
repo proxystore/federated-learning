@@ -1,11 +1,17 @@
 import argparse
+import datetime
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
 import tensorflow as tf
 import yaml
 
 from flox import federated_fit
 from flox.logger import *
+from pathlib import Path
 from tensorflow import keras
-from typing import Optional
+
+plt.style.use("bmh")
 
 
 def create_model(
@@ -40,7 +46,7 @@ def create_model(
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--endpoints", "-E", default="local-endpoints.yml", type=str)
+    parser.add_argument("--endpoints", "-E", default=Path("configs/local-endpoints.yml"), type=str)
     parser.add_argument("--samples", "-s", default=100, type=int)
     parser.add_argument("--epochs", "-e", default=3, type=int)
     parser.add_argument("--loops", "-l", default=5, type=int)
@@ -48,14 +54,17 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--store-name", "-n", default="floxystore", type=str)
     parser.add_argument("--store-hostname", "-o", default="localhost", type=str)
     parser.add_argument("--store-port", "-p", default=6060, type=int)
+    parser.add_argument("--no-proxystore", action="store_true")
     args = parser.parse_args()
+    if args.no_proxystore:
+        args.store_name, args.store_hostname, args.store_port = None, None, None
     store_args = (args.store_name, args.store_hostname, args.store_port)
     if not any([
         all(arg is None for arg in store_args),
         all(arg is not None for arg in store_args)
     ]):
-        raise ValueError('Arguments for ProxyStore (`--store_name`, `--store_hostname`, '
-                         '`--store_port`) must ALL be either None or not None.')
+        raise ValueError("Arguments for ProxyStore (`--store_name`, `--store_hostname`, "
+                         "`--store_port`) must ALL be either None or not None.")
     return args
 
 
@@ -63,9 +72,17 @@ def main(args: argparse.Namespace) -> None:
     # Load the endpoints and set up the ProxyStore arguments for the Store.
     endpoint_ids = yaml.safe_load(open(args.endpoints, 'r'))
     store_args = dict(name=args.store_name, hostname=args.store_hostname, port=args.store_port)
-    store_args = None if None in store_args.values() else store_args
+    if None in store_args.values():
+        store_args = dict(
+            name=None,
+            hostname=None,
+            port=None
+        )
 
-    for nhl in [1]:
+    (_, _), (x_test, y_test) = keras.datasets.cifar10.load_data()
+
+    result_list = []
+    for nhl in [1, 5, 10]:
         model = create_model(
             n_hidden_layers=nhl,
             n_classes=10,
@@ -91,12 +108,22 @@ def main(args: argparse.Namespace) -> None:
             loss="categorical_crossentropy",
             optimizer="adam",
             metrics=["accuracy"],
-            # x_test=[],  # TODO
-            # y_test=[],  # TODO
+            x_test=x_test,
+            y_test=y_test,
             store_args=store_args
         )
-
+        results["num_hidden_layers"] = nhl
+        result_list.append(results)
         logging.info(f"(# hidden layers = {nhl})  Received training results: {results}")
+
+    data = pd.concat(result_list)
+    timestamp = datetime.datetime.now().isoformat().replace("T", "_")
+    data.to_csv(Path(f"out/results_{timestamp}.csv"))
+    sns.lineplot(data=data, x="round", y="accuracy", hue="endpoint_id", style="num_hidden_layers")
+    plt.show()
+
+    sns.lineplot(data=data, x="round", y="transfer_time", hue="endpoint_id", style="num_hidden_layers")
+    plt.show()
 
 
 if __name__ == '__main__':

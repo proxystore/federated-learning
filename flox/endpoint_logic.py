@@ -2,7 +2,7 @@ def local_fit(
         endpoint_id,
         json_model_config,
         global_model_weights,
-        num_samples=None,
+        train_indices,
         epochs=10,
         keras_dataset="mnist",
         preprocess=True,
@@ -22,6 +22,7 @@ def local_fit(
     # Import all the dependencies required for funcX, TensorFlow, and ProxyStore
     import numpy as np
     from tensorflow import keras
+    from time import perf_counter
     from proxystore.connectors.redis import RedisConnector
     from proxystore.store import get_store, register_store, Store
 
@@ -55,10 +56,8 @@ def local_fit(
     (x_train, y_train), _ = DATASET_MAP[keras_dataset].load_data()
 
     # take a random set of images
-    if num_samples:
-        idx = np.random.choice(np.arange(len(x_train)), num_samples, replace=True)
-        x_train = x_train[idx]
-        y_train = y_train[idx]
+    x_train = x_train[train_indices]
+    y_train = y_train[train_indices]
 
     if preprocess and keras_dataset in IMG_DATASETS:
         num_classes = 100 if keras_dataset == "cifar100" else 10
@@ -77,7 +76,8 @@ def local_fit(
     model.set_weights(global_model_weights)
 
     # Train the model on the local data and extract the weights then convert them to numpy.
-    model.fit(x_train, y_train, epochs=epochs)
+    history = model.fit(x_train, y_train, epochs=epochs)
+    print(f'{type(history)=}\n{history.history.keys()}')
     model_weights = model.get_weights()
     np_model_weights = np.asarray(model_weights, dtype=object)
 
@@ -86,11 +86,16 @@ def local_fit(
     data = {
         "endpoint_id": endpoint_id,
         "model_weights": np_model_weights,
-        "samples_count": x_train.shape[0]
+        "samples_count": x_train.shape[0],
+        "accuracy": history.history["accuracy"],
+        "loss": history.history["loss"],
+        "num_data_samples": len(train_indices)
     }
     if all([arg is None for arg in store_args]):
+        data["time_before_transfer"] = perf_counter()
         return data
     elif all([arg is not None for arg in store_args]):
+        data["time_before_transfer"] = perf_counter()
         store = Store(
             name=store_name,
             connector=RedisConnector(hostname=store_hostname, port=store_port),

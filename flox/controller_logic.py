@@ -1,12 +1,15 @@
 import numpy as np
 import time
 
+from collections import defaultdict
 from flox.endpoint_logic import local_fit
 from flox.logger import *
-from funcx.sdk.executor import FuncXExecutor
-from typing import Optional
-
 from flox.results import FloxResults
+from funcx.sdk.executor import FuncXExecutor
+from pandas import DataFrame
+from tensorflow import keras
+from time import perf_counter
+from typing import Optional
 
 
 def federated_fit(
@@ -28,8 +31,9 @@ def federated_fit(
         x_test=None,
         y_test=None,
         store_args: dict[str, str] = None,  # ProxyStore Store object
+        history_metrics_aggr: str = None,
         silent: bool = False
-) -> FloxResults:
+) -> DataFrame:
     # Handle default argument values.
     if isinstance(num_samples, int):
         num_samples = [num_samples] * len(endpoint_ids)
@@ -39,20 +43,32 @@ def federated_fit(
         path_dir = "/home/pi/datasets"
     if isinstance(path_dir, str):
         path_dir = [path_dir] * len(endpoint_ids)
+    if history_metrics_aggr is None:
+        history_metrics_aggr = "mean"
     if metrics is None:
         metrics = ["accuracy"]
+    if history_metrics_aggr not in ["mean", "recent"]:
+        raise ValueError("Argument `history_metrics_aggr` must be either 'mean' or 'recent'.")
 
     iters = (endpoint_ids, num_samples, epochs, path_dir)
     if not all([len(endpoint_ids) == len(it) for it in iters]):
         raise ValueError(f"Length of iterators ('endpoint_ids', 'num_samples', "
                          f"'epochs', 'path_dir') must be of the same length.")
 
+    # Initialize the data indices for each of the training endpoints.
+    (x_train, _), (_, _) = keras.datasets.cifar10.load_data()
+    train_indices = {
+        endp: np.random.choice(np.arange(len(x_train)), k, replace=True)
+        for endp, k in zip(endpoint_ids, num_samples)
+    }
+
     # Global Federated training loop.
-    for i in range(loops):
+    results = defaultdict(list)
+    for rnd in range(loops):
         # Save the model architecture, weights, and prepare to store tasks/results for execution.
         model_json = global_model.to_json()
         global_model_weights = np.asarray(global_model.get_weights(), dtype=object)
-        tasks, results = [], []
+        tasks, local_results = [], []
 
         # Identify the execution kind.
         local_endpoints = list(filter(lambda val: val.startswith('local'), endpoint_ids))
@@ -68,7 +84,7 @@ def federated_fit(
                 endpoint_id=endp,
                 json_model_config=model_json,
                 global_model_weights=global_model_weights,
-                num_samples=samples,
+                train_indices=train_indices[endp],
                 epochs=n_epochs,
                 keras_dataset=keras_dataset,
                 preprocess=preprocess,
@@ -85,7 +101,7 @@ def federated_fit(
                 store_port=store_args["port"],
             )
             if local_run:
-                results.append(local_fit(**kwargs))
+                local_results.append(local_fit(**kwargs))
             else:
                 with FuncXExecutor(endp) as fx:
                     tasks.append(fx.submit(local_fit, **kwargs))
@@ -93,15 +109,29 @@ def federated_fit(
         # Retrieve and store the results from the training nodes.
         if not local_run:
             for t in tasks:
-                results.append(t.result())
+                local_results.append(t.result())
 
         # Extract model updates from endpoints and then aggregate them to update the global model.
-        model_weights = [res["model_weights"] for res in results]
-        weights = np.array([res["samples_count"] for res in results])
+        model_weights = [res["model_weights"] for res in local_results]
+        weights = np.array([res["samples_count"] for res in local_results])
         weights = weights / weights.sum(0)
         average_weights = np.average(model_weights, weights=weights, axis=0)
         global_model.set_weights(average_weights)
-        logging.info(f"Epoch {i}, Trained Federated Model")
+        logging.info(f"Aggr. Round {rnd}, Trained Federated Model")
+
+        # Record the results from this aggregation round.
+        for res in local_results:
+            if history_metrics_aggr == "mean":
+                acc_result = sum(res["accuracy"]) / len(res["accuracy"])
+                loss_result = sum(res["loss"]) / len(res["loss"])
+            else:  # i.e., history_metrics_aggr == "recent"
+                acc_result = res["accuracy"][-1]
+                loss_result = res["loss"][-1]
+            results["round"].append(rnd)
+            results["endpoint_id"].append(res["endpoint_id"])
+            results["accuracy"].append(acc_result)
+            results["loss"].append(loss_result)
+            results["transfer_time"].append(perf_counter() - res["time_before_transfer"])
 
         # Evaluate the global model, if all the necessary parameters are given.
         if all([x_test is not None, y_test is not None]):
@@ -113,4 +143,4 @@ def federated_fit(
         if time_interval > 0:
             time.sleep(time_interval)
 
-    return global_model
+    return DataFrame.from_dict(results)
