@@ -1,8 +1,6 @@
 import argparse
 import datetime
-import matplotlib.pyplot as plt
 import pandas as pd
-import seaborn as sns
 import tensorflow as tf
 import yaml
 
@@ -10,8 +8,6 @@ from flox import federated_fit
 from flox.logger import *
 from pathlib import Path
 from tensorflow import keras
-
-plt.style.use("bmh")
 
 
 def create_model(
@@ -85,7 +81,7 @@ def get_store_iters(args: argparse.Namespace) -> dict[str, dict[str, str]]:
 
 def main(args: argparse.Namespace) -> None:
     # Load the endpoints and set up the ProxyStore arguments for the Store.
-    endpoint_ids = yaml.safe_load(open(args.endpoints, 'r'))
+    endpoint_ids = yaml.safe_load(open(args.endpoints, "r"))
     (_, _), (x_test, y_test) = keras.datasets.cifar10.load_data()
 
     result_list = []
@@ -95,7 +91,7 @@ def main(args: argparse.Namespace) -> None:
                 n_hidden_layers=nhl,
                 n_classes=10,
                 optimizer="adam",
-                loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+                loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
                 metrics=["accuracy"]
             )
 
@@ -127,12 +123,7 @@ def main(args: argparse.Namespace) -> None:
 
     data = pd.concat(result_list)
     timestamp = datetime.datetime.now().isoformat().replace("T", "_")
-    data.to_csv(Path(f"out/results_{timestamp}.csv"))
-    sns.lineplot(data=data, x="round", y="accuracy", hue="endpoint_id", style="num_hidden_layers")
-    plt.show()
-
-    sns.lineplot(data=data, x="round", y="transfer_time", hue="endpoint_id", style="num_hidden_layers")
-    plt.show()
+    data.to_csv(Path(f"out/results_{timestamp}.csv"), index=False)
 
 
 if __name__ == '__main__':

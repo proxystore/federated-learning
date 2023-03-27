@@ -69,7 +69,7 @@ def local_fit(
     # Create/compile the model, setting its weights. Then set its weights to the global model.
     model = keras.models.model_from_json(json_model_config)
     model.compile(
-        loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+        loss=keras.losses.SparseCategoricalCrossentropy(from_logits=False),
         optimizer="adam",
         metrics=metrics
     )
