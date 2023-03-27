@@ -75,10 +75,11 @@ def federated_fit(
         if not (len(local_endpoints) == 0 or len(local_endpoints) == len(endpoint_ids)):
             raise ValueError("You cannot have endpoints of mixed types. You can only have all "
                              "local endpoints (prefixed with 'local') or all funcX endpoints.")
-        local_run = all([endp.startswith("local") for endp in endpoint_ids])
+        locally_execute = all([endp.startswith("local") for endp in endpoint_ids])
 
         # submit the corresponding parameters to each endpoint for a round of FL
         logging.info(f'{iters=}')
+        endpoint_end_times = {}
         for endp, samples, n_epochs, path in zip(*iters):
             kwargs = dict(
                 endpoint_id=endp,
@@ -100,16 +101,19 @@ def federated_fit(
                 store_hostname=store_args["hostname"],
                 store_port=store_args["port"],
             )
-            if local_run:
+            if locally_execute:
                 local_results.append(local_fit(**kwargs))
+                endpoint_end_times[endp] = perf_counter()
             else:
                 with FuncXExecutor(endp) as fx:
                     tasks.append(fx.submit(local_fit, **kwargs))
 
         # Retrieve and store the results from the training nodes.
-        if not local_run:
+        if not locally_execute:
             for t in tasks:
-                local_results.append(t.result())
+                res = t.result()
+                local_results.append(res)
+                endpoint_end_times[res["endpoint_id"]] = perf_counter()
 
         # Extract model updates from endpoints and then aggregate them to update the global model.
         model_weights = [res["model_weights"] for res in local_results]
@@ -131,7 +135,7 @@ def federated_fit(
             results["endpoint_id"].append(res["endpoint_id"])
             results["accuracy"].append(acc_result)
             results["loss"].append(loss_result)
-            results["transfer_time"].append(perf_counter() - res["time_before_transfer"])
+            results["transfer_time"].append(endpoint_end_times[res["endpoint_id"]] - res["time_before_transfer"])
 
         # Evaluate the global model, if all the necessary parameters are given.
         if all([x_test is not None, y_test is not None]):

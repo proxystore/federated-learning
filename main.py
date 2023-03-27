@@ -68,53 +68,62 @@ def get_args() -> argparse.Namespace:
     return args
 
 
+def get_store_iters(args: argparse.Namespace) -> dict[str, dict[str, str]]:
+    store_args = {"no_store": {
+        "name": None,
+        "hostname": None,
+        "port": None,
+    }}
+    if not args.no_proxystore:
+        store_args["proxystore"] = {
+            "name": args.store_name,
+            "hostname": args.store_hostname,
+            "port": args.store_port,
+        }
+    return store_args
+
+
 def main(args: argparse.Namespace) -> None:
     # Load the endpoints and set up the ProxyStore arguments for the Store.
     endpoint_ids = yaml.safe_load(open(args.endpoints, 'r'))
-    store_args = dict(name=args.store_name, hostname=args.store_hostname, port=args.store_port)
-    if None in store_args.values():
-        store_args = dict(
-            name=None,
-            hostname=None,
-            port=None
-        )
-
     (_, _), (x_test, y_test) = keras.datasets.cifar10.load_data()
 
     result_list = []
-    for nhl in [1, 5, 10]:
-        model = create_model(
-            n_hidden_layers=nhl,
-            n_classes=10,
-            optimizer="adam",
-            loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-            metrics=["accuracy"]
-        )
+    for store_key, store_args in get_store_iters(args).items():
+        for nhl in [1, 5, 10, 15, 20, 25]:
+            model = create_model(
+                n_hidden_layers=nhl,
+                n_classes=10,
+                optimizer="adam",
+                loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+                metrics=["accuracy"]
+            )
 
-        # Start the FL loop.
-        results = federated_fit(
-            global_model=model,  # .to_json(),
-            endpoint_ids=endpoint_ids,
-            num_samples=args.samples,
-            epochs=args.epochs,
-            loops=args.loops,
-            time_interval=args.time_interval,
-            keras_dataset="cifar10",
-            preprocess=False,
-            path_dir="/home/pi/datasets",
-            x_train_name="mnist_x_train.npy",
-            y_train_name="mnist_y_train.npy",
-            input_shape=(32, 32, 32, 3),
-            loss="categorical_crossentropy",
-            optimizer="adam",
-            metrics=["accuracy"],
-            x_test=x_test,
-            y_test=y_test,
-            store_args=store_args
-        )
-        results["num_hidden_layers"] = nhl
-        result_list.append(results)
-        logging.info(f"(# hidden layers = {nhl})  Received training results: {results}")
+            # Start the FL loop.
+            results = federated_fit(
+                global_model=model,  # .to_json(),
+                endpoint_ids=endpoint_ids,
+                num_samples=args.samples,
+                epochs=args.epochs,
+                loops=args.loops,
+                time_interval=args.time_interval,
+                keras_dataset="cifar10",
+                preprocess=False,
+                path_dir="/home/pi/datasets",
+                x_train_name="mnist_x_train.npy",
+                y_train_name="mnist_y_train.npy",
+                input_shape=(32, 32, 32, 3),
+                loss="categorical_crossentropy",
+                optimizer="adam",
+                metrics=["accuracy"],
+                x_test=x_test,
+                y_test=y_test,
+                store_args=store_args
+            )
+            results["num_hidden_layers"] = nhl
+            results["store"] = store_key
+            result_list.append(results)
+            logging.info(f"(# hidden layers = {nhl})  Received training results: {results}")
 
     data = pd.concat(result_list)
     timestamp = datetime.datetime.now().isoformat().replace("T", "_")
