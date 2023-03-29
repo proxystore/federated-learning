@@ -45,7 +45,25 @@ endpn===|train/test|datan
 - [ ] Polish the current code to be more somewhat legible.
 - [ ] Implement a more complex model (loosely based on MobileNet but for CIFAR-10). We want a more complex model to
   make the data transfer improvements maybe a bit more interesting.
+- [ ] Move from `RedisStore` to `EndpointStore`.
 
 ### NOTES:
 
 - Batch size on the raspberry pis (they're v3) needs to be very small (i.e., `1`).
+
+### ProxyStore Notes:
+
+- Proxystore-Endpoint notes: https://docs.proxystore.dev/main/guides/endpoints/
+- Greg sent:
+
+> This is the relay server address that is used with the ProxyStore-Endpoint CLI:
+> - wss://relay.proxystore.dev
+>
+> FuncX client:
+> https://github.com/proxystore/benchmarks/blob/main/psbench/benchmarks/funcx_tasks/main.py
+> FuncX task:
+> https://github.com/proxystore/benchmarks/blob/a157bfad270a9cf7d9fe2cc38f6f9d434d8de48d/psbench/tasks/pong.py#L74
+>
+> `proxystore-endpoint configure my-endpoint --relay-server wss://relay.proxystore.dev`
+>
+> (Every note can have the same name, they'll get their own unique uuids.)

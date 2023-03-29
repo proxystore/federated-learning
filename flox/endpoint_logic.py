@@ -21,6 +21,8 @@ def local_fit(
 ):
     # Import all the dependencies required for funcX, TensorFlow, and ProxyStore
     import numpy as np
+    import sys
+    import pickle
     from tensorflow import keras
     from time import perf_counter
     from proxystore.connectors.redis import RedisConnector
@@ -89,10 +91,13 @@ def local_fit(
         "samples_count": x_train.shape[0],
         "accuracy": history.history["accuracy"],
         "loss": history.history["loss"],
-        "num_data_samples": len(train_indices)
+        "num_data_samples": len(train_indices),
+        "data_transfer_size": float(0)
     }
+    data["data_transfer_size"] = sys.getsizeof(pickle.dumps(data))
     if all([arg is None for arg in store_args]):
         data["time_before_transfer"] = perf_counter()
+
         return data
     elif all([arg is not None for arg in store_args]):
         data["time_before_transfer"] = perf_counter()
@@ -101,6 +106,14 @@ def local_fit(
             connector=RedisConnector(hostname=store_hostname, port=store_port),
             metrics=True
         )
+        """
+        # Endpoint version
+        store = Store(
+            name=store_name,
+            connector=EndpointConnector(hostname=store_hostname, port=store_port),
+            metrics=True
+        )
+        """
         proxy = store.proxy(data)
         return proxy
     else:
