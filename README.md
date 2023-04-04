@@ -67,3 +67,8 @@ endpn===|train/test|datan
 > `proxystore-endpoint configure my-endpoint --relay-server wss://relay.proxystore.dev`
 >
 > (Every note can have the same name, they'll get their own unique uuids.)
+
+To use one of the RPI endpoints, you need to start the `proxystore-endpoint` so it that the `EndpointConnector` for data transfer can work. To do this, run the following in the terminal of the logged in node:
+```
+proxystore-endpoint start flox
+```

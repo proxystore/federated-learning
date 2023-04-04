@@ -1,0 +1,15 @@
+rpi0:
+  funcx-id: 57cfe235-bf71-472a-989f-20bcaf7c35dd
+  proxystore-id: 1863efb3-4e56-4790-ae8b-b47f991168fd
+
+# rpi1:
+#   funcx-id: bf34c1f3-a3b1-4de6-a34c-25a897d98a5b
+#   proxystore-id: 8970a83b-62c1-40b7-8145-ce77172a4325
+
+# rpi2:
+#   funcx-id: 29969205-94cc-450e-803c-665f750b9b0c
+#   proxystore-id: 4f01bfd8-ad8c-43da-914d-b00429dafb70
+
+# rpi3:
+#   funcx-id: d7e180d8-f7e4-4d48-a351-851c1b20e5e9
+#   proxystore-id: 35876a1a-075f-414d-8acb-493800bbe2b5

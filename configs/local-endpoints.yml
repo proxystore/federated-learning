@@ -1,3 +1,11 @@
-- local:0
-- local:1
-- local:2
+local:0:
+  funcx-id: ~
+  proxystore-id: ~
+
+local:1:
+  funcx-id: ~
+  proxystore-id: ~
+
+local:2:
+  funcx-id: ~
+  proxystore-id: ~

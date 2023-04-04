@@ -1,44 +1,58 @@
 def local_fit(
-        endpoint_id,
+        endpoint_name,
         json_model_config,
         global_model_weights,
         train_indices,
-        epochs=10,
+        epochs=1,
         keras_dataset="mnist",
         preprocess=True,
-        path_dir="/home/pi/datasets",
-        x_train_name="mnist_x_train.npy",
-        y_train_name="mnist_y_train.npy",
+        data_dir=None,
         input_shape=(32, 28, 28, 1),
-        loss="sparse_categorical_crossentropy",
         optimizer="adam",
         metrics=None,
         use_proxystore: bool = False
 ):
+    ###############################################################################################
     # Import all the dependencies required for funcX, TensorFlow, and ProxyStore
+    ###############################################################################################
     import numpy as np
     import sys
     import pickle
     from tensorflow import keras
     from time import perf_counter
-    from proxystore.connectors.redis import RedisConnector
     from proxystore.proxy import is_resolved, Proxy
-    from proxystore.store import get_store, register_store, Store
+    from proxystore.store import get_store, Store
 
     if metrics is None:
         metrics = ["accuracy"]
+        
+    ###############################################################################################
+    # Load the datasets from the the provided path directory.
+    ###############################################################################################
+    
+    from pathlib import Path
+    legal_datasets = ["mnist", "fashion_mnist"]
+    if keras_dataset not in legal_datasets:
+        raise Exception(f"Please select one of the built-in Keras datasets: {legal_datasets}.")
+    if data_dir is None:
+        data_dir = Path.home() / "data" / keras_dataset
+    x_train = np.load(data_dir / "x_train.npy")
+    y_train = np.load(data_dir / "y_train.npy")
+    # x_test = np.load(data_dir / "x_test.npy")
+    # y_test = np.load(data_dir / "y_test.npy")
 
-    # retrieve (and optionally process) the data
-    dataset_map = {
-        "mnist": keras.datasets.mnist,
-        "fashion_mnist": keras.datasets.fashion_mnist,
-        "cifar10": keras.datasets.cifar10,
-        "cifar100": keras.datasets.cifar100,
-        "imdb": keras.datasets.imdb,
-        "reuters": keras.datasets.reuters,
-        "boston_housing": keras.datasets.boston_housing
-    }
-    img_datasets = ["mnist", "fashion_mnist", "cifar10", "cifar100"]
+    x_train = x_train[train_indices]
+    y_train = y_train[train_indices]
+    if preprocess and keras_dataset in img_datasets:
+        num_classes = 100 if keras_dataset == "cifar100" else 10
+        x_train = x_train.astype("float32") / 255
+        if x_train.shape[-1] not in [1, 3]:
+            x_train = np.expand_dims(x_train, -1)
+        y_train = keras.utils.to_categorical(y_train, num_classes)
+
+    ###############################################################################################
+    # Resolve the remote data store from the global model weights if ProxyStore is being used.
+    ###############################################################################################
 
     if use_proxystore:
         assert isinstance(global_model_weights, bytes) and isinstance(global_model_weights, Proxy)
@@ -49,23 +63,10 @@ def local_fit(
     else:
         store = None
 
-    ####################################################################################################################
-    ####################################################################################################################
-
-    # Load the data with the indices specified for this client.
-    if keras_dataset not in dataset_map:
-        raise Exception(f"Please select one of the built-in Keras datasets: {list(dataset_map)}")
-    (x_train, y_train), _ = dataset_map[keras_dataset].load_data()
-    x_train = x_train[train_indices]
-    y_train = y_train[train_indices]
-    if preprocess and keras_dataset in img_datasets:
-        num_classes = 100 if keras_dataset == "cifar100" else 10
-        x_train = x_train.astype("float32") / 255
-        if x_train.shape[-1] not in [1, 3]:
-            x_train = np.expand_dims(x_train, -1)
-        y_train = keras.utils.to_categorical(y_train, num_classes)
-
-    # Create/compile the model, setting its weights. Then set its weights to the global model.
+    ###############################################################################################
+    # Perform the local training for the federated learning process then return the params.
+    ###############################################################################################
+    
     model = keras.models.model_from_json(json_model_config)
     model.compile(
         loss=keras.losses.SparseCategoricalCrossentropy(from_logits=False),
@@ -73,18 +74,18 @@ def local_fit(
         metrics=metrics
     )
     model.set_weights(global_model_weights)
-
-    # Train the model on the local data and extract the weights then convert them to numpy.
-    history = model.fit(x_train, y_train, epochs=epochs)
+    history = model.fit(x_train, y_train, epochs=epochs).history
     model_weights = np.asarray(model.get_weights(), dtype=object)
+    # history = {"accuracy": [0.9], "loss": [3.14]}
+    # model_weights = global_model_weights
 
     # Return the updated weights and number of samples the model was trained on
     data = {
-        "endpoint_id": endpoint_id,
+        "endpoint_name": endpoint_name,
         "model_weights": model_weights,
         "samples_count": x_train.shape[0],
-        "accuracy": history.history["accuracy"],
-        "loss": history.history["loss"],
+        "accuracy": history["accuracy"],
+        "loss": history["loss"],
         "num_data_samples": len(train_indices),
         "data_transfer_size": float(0),
         "time_before_transfer": perf_counter()
