@@ -1,0 +1,19 @@
+controller:
+  funcx-id: ~
+  proxystore-id: 12f99257-5ebb-418d-91b9-14b88d5cdade
+
+hawfinch:
+  funcx-id: e7d1a376-8662-464f-ae09-9d9ba803747c
+  proxystore-id: 1ba0b36d-22ad-49cc-9133-030ce5a501df
+
+kestrel:
+  funcx-id: 3ce8322e-5be8-48bc-89ad-873a99fbd600
+  proxystore-id: 6b9271b0-7082-4c16-a5f6-262ceabf4c44
+
+ryerson:
+  funcx-id: 5829ce6a-132a-4d73-b41d-d6a9f5d3ba84
+  proxystore-id: 6b7695b7-8030-4d1c-a81e-3129680bd573
+
+jetson:
+  funcx-id: 582936d3-910a-44bb-8590-0197b525540a
+  proxystore-id: 60208bfe-70e3-44bf-a1a3-8e5c7d892d5c

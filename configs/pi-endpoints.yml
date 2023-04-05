@@ -1,3 +1,11 @@
+controller:
+  funcx-id: ~
+  proxystore-id: 12f99257-5ebb-418d-91b9-14b88d5cdade
+
+#jetson:
+#  funcx-id: 582936d3-910a-44bb-8590-0197b525540a
+#  proxystore-id: e21ac60d-63ed-4400-897b-89ad074b4064
+
 rpi0:
   funcx-id: 57cfe235-bf71-472a-989f-20bcaf7c35dd
   proxystore-id: 1863efb3-4e56-4790-ae8b-b47f991168fd

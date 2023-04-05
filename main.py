@@ -1,4 +1,5 @@
 import argparse
+import caffeine
 import datetime
 import numpy as np
 import pandas as pd
@@ -6,14 +7,16 @@ import tensorflow as tf
 import yaml
 
 from flox import federated_fit
+from flox.endpoint_logic import local_fit
 from flox.endpoint import EndpointKind
 from flox.logger import *
+from funcx import FuncXExecutor
 from pathlib import Path
 from tensorflow import keras
-from typing import Optional
+from typing import Any, Optional
 
 
-def _init_endpoints(path: Path) -> tuple[list, EndpointKind]:
+def _init_endpoints(path: Path) -> tuple[dict[str, dict[str, str]], EndpointKind]:
     endpoints = yaml.safe_load(open(path, "r"))
     endp_data_types = list()
     for endp, endp_val in endpoints.items():
@@ -21,7 +24,7 @@ def _init_endpoints(path: Path) -> tuple[list, EndpointKind]:
             if key not in endp_val:
                 raise ValueError(f"Endpoint {endp} in {path} is missing required key, {key}.")
             endp_data_types.append(endp_val[key] is None)
-    
+
     if all([data_type is None for data_type in endp_data_types]):
         kind = EndpointKind.local
     elif all([data_type is not None for data_type in endp_data_types]):
@@ -29,8 +32,9 @@ def _init_endpoints(path: Path) -> tuple[list, EndpointKind]:
     else:
         raise ValueError("Mixed key data types. Keys for a .yaml file must be ALL be null; "
                          "otherwise they all must be not NULL.")
-    
+
     return endpoints, kind
+
 
 def create_model(
         input_shape: tuple,
@@ -63,26 +67,30 @@ def create_model(
     return model
 
 
-def get_store_iters(args: argparse.Namespace) -> dict[str, dict[str, str]]:
-    store_args = {"no_store": {
-        "use_proxystore": False,
-        "store_name": None,
-        "proxystore_dir": None,
-        "metrics": True,
-    }}
-    if not args.no_proxystore:
-        store_args["proxystore"] = {
+def get_store_iters(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
+    metrics = False
+    store_args = {
+        "no_store": {
+            "use_proxystore": False,
+            "store_name": None,
+            "proxystore_dir": None,
+            "metrics": metrics,
+        },
+        "proxystore": {
             "use_proxystore": True,
             "store_name": args.store_name,
-            "proxystore_dir": args.store_dir,
-            "metrics": True
+            "proxystore_dir": None,
+            "metrics": metrics
         }
+    }
+    if args.no_proxystore:
+        del store_args["proxystore"]
     return store_args
 
 
 def get_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--endpoints", "-E", default=Path("configs/pi-endpoints.yml"), type=str)
+    parser.add_argument("--endpoints", "-E", default=Path("configs/workstation-endpoints.yml"), type=str)
     parser.add_argument("--samples", "-s", default=100, type=int)
     parser.add_argument("--epochs", "-e", default=1, type=int)
     parser.add_argument("--loops", "-l", default=5, type=int)
@@ -93,15 +101,6 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--no-proxystore", action="store_true")
     parser.add_argument("--data-name", type=str, choices=["fashion_mnist", "mnist"], default="mnist")
     args = parser.parse_args()
-    # if args.no_proxystore:
-    #     args.store_name, args.store_dir, args.store_port = None, None, None
-    # store_args = (args.store_name, args.store_dir, args.store_port)
-    # if not any([
-    #     all(arg is None for arg in store_args),
-    #     all(arg is not None for arg in store_args)
-    # ]):
-    #     raise ValueError("Arguments for ProxyStore (`--store_name`, `--store_hostname`, "
-    #                      "`--store_port`) must ALL be either None or not None.")
     return args
 
 
@@ -111,8 +110,8 @@ def get_test_data(data_name: str, data_dir: Optional[Path] = None) -> tuple[tupl
         raise Exception(f"Please select one of the built-in Keras datasets: {legal_datasets}.")
     if data_dir is None:
         data_dir = Path.home() / "data" / data_name
-    x_test = np.load(data_dir / "x_test.npy")
-    y_test = np.load(data_dir / "y_test.npy")
+    x_test = np.load(str(data_dir / "x_test.npy"))
+    y_test = np.load(str(data_dir / "y_test.npy"))
     shape_map = {
         "mnist": (28, 28, 1),
         "fashion_mnist": (28, 28, 1),
@@ -124,10 +123,12 @@ def main(args: argparse.Namespace) -> None:
     # Load the endpoints and set up the ProxyStore arguments for the Store.
     endpoints, endpoint_kind = _init_endpoints(args.endpoints)
     (x_test, y_test), input_shape = get_test_data(args.data_name)
+    fxe = FuncXExecutor()
+    train_fn_uuid = fxe.register_function(local_fit)
 
     result_list = []
     for store_key, store_args in get_store_iters(args).items():
-        for nhl in [1]: #, 5, 10, 15, 20, 25]:
+        for nhl in [1, 25, 50, 75, 100]:
             model = create_model(
                 input_shape,
                 n_hidden_layers=nhl,
@@ -139,6 +140,8 @@ def main(args: argparse.Namespace) -> None:
 
             # Start the FL loop.
             results = federated_fit(
+                fxe=fxe,
+                train_fn_uuid=train_fn_uuid,
                 global_model=model,  # .to_json(),
                 endpoints=endpoints,
                 endpoint_kind=endpoint_kind,
@@ -153,19 +156,22 @@ def main(args: argparse.Namespace) -> None:
                 metrics=["accuracy"],
                 x_test=x_test,
                 y_test=y_test,
-                use_proxystore=store_args["use_proxystore"], # Store arguments
+                use_proxystore=store_args["use_proxystore"],  # Store arguments
                 store_name=store_args["store_name"],
                 proxystore_dir=store_args["proxystore_dir"],
             )
             results["num_hidden_layers"] = nhl
             results["store"] = store_key
             result_list.append(results)
-            logging.info(f"(# hidden layers = {nhl})  Received training results: {results}")
+            logging.info(f"(# hidden layers = {nhl}) Received training results:\n{results}")
 
     data = pd.concat(result_list)
     timestamp = datetime.datetime.now().isoformat().replace("T", "_")
-    data.to_csv(Path(f"out/results_{timestamp}.csv"), index=False)
+    data.to_csv(Path(f"out/data/results_{timestamp}.csv"), index=False)
+    fxe.shutdown()
 
 
 if __name__ == '__main__':
+    caffeine.on(display=False)
     main(get_args())
+    caffeine.off()
