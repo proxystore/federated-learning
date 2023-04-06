@@ -13,6 +13,7 @@ from flox.logger import *
 from funcx import FuncXExecutor
 from pathlib import Path
 from tensorflow import keras
+from time import perf_counter
 from typing import Any, Optional
 
 
@@ -70,12 +71,12 @@ def create_model(
 def get_store_iters(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
     metrics = False
     store_args = {
-        "no_store": {
-            "use_proxystore": False,
-            "store_name": None,
-            "proxystore_dir": None,
-            "metrics": metrics,
-        },
+        # "no_store": {
+        #     "use_proxystore": False,
+        #     "store_name": None,
+        #     "proxystore_dir": None,
+        #     "metrics": metrics,
+        # },
         "proxystore": {
             "use_proxystore": True,
             "store_name": args.store_name,
@@ -94,7 +95,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--samples", "-s", default=100, type=int)
     parser.add_argument("--epochs", "-e", default=1, type=int)
     parser.add_argument("--loops", "-l", default=5, type=int)
-    parser.add_argument("--time_interval", "-t", default=5, type=int)
+    parser.add_argument("--time_interval", "-t", default=3, type=int)
     parser.add_argument("--store-name", "-n", default="floxystore", type=str)
     parser.add_argument("--store-dir", "-d", default=None, type=str)
     parser.add_argument("--store-port", "-p", default=6060, type=int)
@@ -127,10 +128,11 @@ def main(args: argparse.Namespace) -> None:
     train_fn_uuid = fxe.register_function(local_fit)
 
     result_list = []
-    n_trials = 3
+    n_trials = 1
     timestamp = datetime.datetime.now().isoformat().replace("T", "_")
     for store_key, store_args in get_store_iters(args).items():
-        for nhl in [1, 25, 50, 75, 100]:
+        for nhl in [1, 10, 20, 30, 40, 50]:
+            # for nhl in [1, 25, 50, 75, 100]:
             # for nhl in [1, 10, 20, 30, 40, 50, 60, 70, 80, 100]:
             for _ in range(n_trials):
                 model = create_model(
@@ -143,6 +145,7 @@ def main(args: argparse.Namespace) -> None:
                 )
 
                 # Start the FL loop.
+                start = perf_counter()
                 results = federated_fit(
                     fxe=fxe,
                     train_fn_uuid=train_fn_uuid,
@@ -164,8 +167,10 @@ def main(args: argparse.Namespace) -> None:
                     store_name=store_args["store_name"],
                     proxystore_dir=store_args["proxystore_dir"],
                 )
-                results["num_hidden_layers"] = nhl
+                end = perf_counter()
+                results["num_hidden_blocks"] = nhl
                 results["store"] = store_key
+                results["time_taken_for_process"] = end - start
                 result_list.append(results)
                 logging.info(f"(# hidden layers = {nhl}) Received training results:\n{results}")
 

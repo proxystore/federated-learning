@@ -27,6 +27,7 @@ def local_fit(
     from proxystore.store import get_store, Store
 
     FUNCX_SIZE_LIMIT = 10485760
+    MODEL_TRAIN_EVAL = True
     fxs = FuncXSerializer()
     if metrics is None:
         metrics = ["accuracy"]
@@ -87,7 +88,8 @@ def local_fit(
 
     write_status("Before setting the local model to use the global weights")
     model.set_weights(global_model_weights)
-    history = model.fit(x_train, y_train, epochs=epochs).history
+    if MODEL_TRAIN_EVAL:
+        history = model.fit(x_train, y_train, epochs=epochs).history
     model_weights = np.asarray(model.get_weights(), dtype=object)
 
     write_status("Preparing to transfer data back to the controller.")
@@ -95,13 +97,18 @@ def local_fit(
         "endpoint_name": endpoint_name,
         "model_weights": store.proxy(model_weights, evict=False) if use_proxystore else model_weights,
         "samples_count": x_train.shape[0],
-        "accuracy": history["accuracy"],
-        "loss": history["loss"],
+        "accuracy": float(0),
+        "loss": float(0),
         "num_data_samples": len(train_indices),
         "data_transfer_size": float(0),
         "start_transfer_time": time.time()
     }
+    if MODEL_TRAIN_EVAL:
+        data["accuracy"] = history["accuracy"]
+        data["loss"] = history["loss"]
     data["data_transfer_size"] = sys.getsizeof(fxs.serialize(data))
+
+    time.sleep(2)
 
     if not use_proxystore and sys.getsizeof(fxs.serialize(data)) > FUNCX_SIZE_LIMIT:
         write_status("funcX size limit EXCEEDED for return")

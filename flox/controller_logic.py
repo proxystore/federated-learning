@@ -26,6 +26,7 @@ from typing import Optional
 
 DEFAULT_STORE_NAME = "floxystore"
 FUNCX_SIZE_LIMIT = 10485760
+MODEL_TRAIN_EVAL = True
 
 
 def _init_store(
@@ -60,7 +61,7 @@ def federated_fit(
         num_samples=100,
         epochs=5,
         loops=1,
-        time_interval=0,
+        time_interval=3,
         keras_dataset: str = "mnist",
         preprocess: bool = False,
         path_dir: Optional[str] = None,
@@ -120,7 +121,7 @@ def federated_fit(
         # Save the model architecture, weights, and prepare to store tasks/results for execution.
         model_json = global_model.to_json()
         global_model_weights = np.asarray(global_model.get_weights(), dtype=object)
-        futures, round_results, endp_end_times = list(), list(), dict()
+        futures, round_results, payload_sizes, endp_end_times = list(), list(), list(), dict()
         logging.info(f"Starting round {rnd + 1}/{loops}.")
 
         for endp, samples, n_epochs, path in zip(*iters):
@@ -143,19 +144,20 @@ def federated_fit(
                 metrics=metrics,
                 use_proxystore=use_proxystore
             )
+            sent_payload_size = sys.getsizeof(fxs.serialize(kwargs))
+            payload_sizes.append(sent_payload_size)
             if endpoint_kind is EndpointKind.local:
                 round_results.append(local_fit(**kwargs))
                 endp_end_times[endp] = time.time()
-            else:
-                if sys.getsizeof(fxs.serialize(kwargs)) < FUNCX_SIZE_LIMIT:
-                    endp_uuid = endpoints[endp]["funcx-id"]
-                    logging.info(f"Submitting local training job via FuncX to endpoint '{endp_uuid}'.")
-                    try:
-                        fxe.endpoint_id = endp_uuid
-                        fut = fxe.submit_to_registered_function(train_fn_uuid, kwargs=kwargs)
-                        futures.append(fut)
-                    except FuncxError:
-                        pass
+            elif endpoint_kind is EndpointKind.remote and sent_payload_size < FUNCX_SIZE_LIMIT:
+                endp_uuid = endpoints[endp]["funcx-id"]
+                logging.info(f"Submitting local training job via FuncX to endpoint '{endp_uuid}'.")
+                try:
+                    fxe.endpoint_id = endp_uuid
+                    fut = fxe.submit_to_registered_function(train_fn_uuid, kwargs=kwargs)
+                    futures.append(fut)
+                except FuncxError:
+                    pass
 
         # Retrieve and store the results from the training nodes.
         logging.info("Retrieving results from the endpoint(s).")
@@ -185,34 +187,37 @@ def federated_fit(
             global_model.set_weights(average_weights)
             logging.info(f"Finished model aggregation phase {rnd + 1}.")
 
-            # Evaluate the global model, if all the necessary parameters are given.
-            if all([x_test is not None, y_test is not None]):
-                logging.info("Beginning the global testing phase.")
-                test_loss, test_acc = global_model.evaluate(x_test, y_test, verbose=0)
-                logging.info(f"Finished the global testing phase:  {test_loss=:0.4f}  |  {test_acc=:0.5f}.")
-            else:
-                test_loss, test_acc = None, None
-
             # Record the results from this aggregation round.
             logging.info(f"Storing the results from aggregation round {rnd + 1}.")
+            if MODEL_TRAIN_EVAL:
+                if all([x_test is not None, y_test is not None]):
+                    logging.info("Beginning the global testing phase.")
+                    test_loss, test_acc = global_model.evaluate(x_test, y_test, verbose=0)
+                    logging.info(f"Finished the global testing phase:  {test_loss=:0.4f}  |  {test_acc=:0.5f}.")
+                else:
+                    test_loss, test_acc = None, None
+                    
             for res in round_results:
-                if history_metrics_aggr == "mean":
-                    train_acc = sum(res["accuracy"]) / len(res["accuracy"])
-                    test_loss = sum(res["loss"]) / len(res["loss"])
-                else:  # i.e., history_metrics_aggr == "recent"
-                    train_acc = res["accuracy"][-1]
-                    test_loss = res["loss"][-1]
-
                 results["round"].append(rnd + 1)
                 results["endpoint_name"].append(res["endpoint_name"])
-                results["accuracy"].append(train_acc)
-                results["loss"].append(test_loss)
                 results["transfer_time"].append(res["end_transfer_time"] - res["start_transfer_time"])
                 results["data_transfer_size"].append(res["data_transfer_size"])
-                results["model_size_bytes"].append(sys.getsizeof(global_model_weights))
+                results["model_param_size"].append(sys.getsizeof(fxs.serialize(global_model_weights)))
+                results["model_arch_size"].append(sys.getsizeof(fxs.serialize(model_json)))
                 results["local"].append(endpoint_kind is EndpointKind.local)
-                results["test_accuracy"].append(test_acc)
-                results["test_loss"].append(test_loss)
+
+                if MODEL_TRAIN_EVAL:
+                    if history_metrics_aggr == "mean":
+                        train_acc = sum(res["accuracy"]) / len(res["accuracy"])
+                        test_loss = sum(res["loss"]) / len(res["loss"])
+                    else:  # i.e., history_metrics_aggr == "recent"
+                        train_acc = res["accuracy"][-1]
+                        test_loss = res["loss"][-1]
+
+                    results["test_accuracy"].append(test_acc)
+                    results["test_loss"].append(test_loss)
+                    results["train_accuracy"].append(train_acc)
+                    results["train_loss"].append(test_loss)
 
         # If `time_interval` is supplied, wait for `time_interval` seconds.
         if time_interval > 0:
