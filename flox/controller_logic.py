@@ -14,6 +14,7 @@ from flox.logger import *
 from flox.results import FloxResults
 from funcx import FuncXClient
 from funcx.errors import FuncxError, MaxResultSizeExceeded
+from funcx.serialize import FuncXSerializer
 from funcx.sdk.executor import FuncXExecutor
 from pandas import DataFrame
 from pathlib import Path
@@ -42,7 +43,7 @@ def _init_store(
                 connector=EndpointConnector(proxystore_endpoints, proxystore_dir),
                 metrics=metrics
             )
-            register_store(store)
+            register_store(store, exist_ok=True)
             return store
     except proxystore.connectors.endpoint.EndpointConnectorError as err:
         logging.error(f"The provided endpoint IDs are:\n{proxystore_endpoints}")
@@ -113,6 +114,7 @@ def federated_fit(
     results = defaultdict(list)
 
     # Global Federated training loop.
+    fxs = FuncXSerializer()
     logging.info("Initializing `FuncXExecutor` and registering local training function.")
     for rnd in range(loops):
         # Save the model architecture, weights, and prepare to store tasks/results for execution.
@@ -145,7 +147,7 @@ def federated_fit(
                 round_results.append(local_fit(**kwargs))
                 endp_end_times[endp] = time.time()
             else:
-                if sys.getsizeof(pickle.dumps(kwargs)) < FUNCX_SIZE_LIMIT:
+                if sys.getsizeof(fxs.serialize(kwargs)) < FUNCX_SIZE_LIMIT:
                     endp_uuid = endpoints[endp]["funcx-id"]
                     logging.info(f"Submitting local training job via FuncX to endpoint '{endp_uuid}'.")
                     try:
@@ -160,57 +162,57 @@ def federated_fit(
         if endpoint_kind is EndpointKind.remote:
             for fut in futures:
                 try:
+                    logging.info("Before call to result()")
                     res = fut.result()
+                    logging.info("After call to result()")
                     if res is None:
                         continue
                     res["end_transfer_time"] = time.time()
                     round_results.append(res)
                 except globus_sdk.exc.api.GlobusAPIError:
-                    pass
+                    logging.info("GlobusAPIError caught.")
                 except MaxResultSizeExceeded:
-                    pass
+                    logging.info("MaxResultsSizeExceeded exception caught.")
 
-        if len(round_results) == 0:
-            if time_interval > 0:
-                time.sleep(time_interval)
-            continue
+        if len(round_results) > 0:
 
-        # Extract model updates from endpoints and then aggregate them to update the global model.
-        logging.info(f"Starting the model aggregation phase {rnd + 1}.")
-        model_weights = [res["model_weights"] for res in round_results]
-        weights = np.array([res["samples_count"] for res in round_results])
-        weights = weights / weights.sum(0)
-        average_weights = np.average(model_weights, weights=weights, axis=0)
-        global_model.set_weights(average_weights)
-        logging.info(f"Finished model aggregation phase {rnd + 1}.")
+            # Extract model updates from endpoints and then aggregate them to update the global model.
+            logging.info(f"Starting the model aggregation phase {rnd + 1}.")
+            model_weights = [res["model_weights"] for res in round_results]
+            weights = np.array([res["samples_count"] for res in round_results])
+            weights = weights / weights.sum(0)
+            average_weights = np.average(model_weights, weights=weights, axis=0)
+            global_model.set_weights(average_weights)
+            logging.info(f"Finished model aggregation phase {rnd + 1}.")
 
-        # Evaluate the global model, if all the necessary parameters are given.
-        if all([x_test is not None, y_test is not None]):
-            logging.info("Beginning the global testing phase.")
-            test_loss, test_acc = global_model.evaluate(x_test, y_test, verbose=0)
-            logging.info(f"Finished the global testing phase:  {test_loss=:0.4f}  |  {test_acc=:0.5f}.")
-        else:
-            test_loss, test_acc = None, None
+            # Evaluate the global model, if all the necessary parameters are given.
+            if all([x_test is not None, y_test is not None]):
+                logging.info("Beginning the global testing phase.")
+                test_loss, test_acc = global_model.evaluate(x_test, y_test, verbose=0)
+                logging.info(f"Finished the global testing phase:  {test_loss=:0.4f}  |  {test_acc=:0.5f}.")
+            else:
+                test_loss, test_acc = None, None
 
-        # Record the results from this aggregation round.
-        logging.info(f"Storing the results from aggregation round {rnd + 1}.")
-        for res in round_results:
-            if history_metrics_aggr == "mean":
-                train_acc = sum(res["accuracy"]) / len(res["accuracy"])
-                test_loss = sum(res["loss"]) / len(res["loss"])
-            else:  # i.e., history_metrics_aggr == "recent"
-                train_acc = res["accuracy"][-1]
-                test_loss = res["loss"][-1]
+            # Record the results from this aggregation round.
+            logging.info(f"Storing the results from aggregation round {rnd + 1}.")
+            for res in round_results:
+                if history_metrics_aggr == "mean":
+                    train_acc = sum(res["accuracy"]) / len(res["accuracy"])
+                    test_loss = sum(res["loss"]) / len(res["loss"])
+                else:  # i.e., history_metrics_aggr == "recent"
+                    train_acc = res["accuracy"][-1]
+                    test_loss = res["loss"][-1]
 
-            results["round"].append(rnd + 1)
-            results["endpoint_name"].append(res["endpoint_name"])
-            results["accuracy"].append(train_acc)
-            results["loss"].append(test_loss)
-            results["transfer_time"].append(res["end_transfer_time"] - res["start_transfer_time"])
-            results["model_size_bytes"].append(sys.getsizeof(global_model_weights))
-            results["local"].append(endpoint_kind is EndpointKind.local)
-            results["test_accuracy"].append(test_acc)
-            results["test_loss"].append(test_loss)
+                results["round"].append(rnd + 1)
+                results["endpoint_name"].append(res["endpoint_name"])
+                results["accuracy"].append(train_acc)
+                results["loss"].append(test_loss)
+                results["transfer_time"].append(res["end_transfer_time"] - res["start_transfer_time"])
+                results["data_transfer_size"].append(res["data_transfer_size"])
+                results["model_size_bytes"].append(sys.getsizeof(global_model_weights))
+                results["local"].append(endpoint_kind is EndpointKind.local)
+                results["test_accuracy"].append(test_acc)
+                results["test_loss"].append(test_loss)
 
         # If `time_interval` is supplied, wait for `time_interval` seconds.
         if time_interval > 0:

@@ -20,12 +20,14 @@ def local_fit(
     import sys
     import time
     import pickle
+    from funcx.serialize import FuncXSerializer
     from tensorflow import keras
     from pathlib import Path
     from proxystore.proxy import is_resolved, Proxy, resolve, extract
     from proxystore.store import get_store, Store
 
     FUNCX_SIZE_LIMIT = 10485760
+    fxs = FuncXSerializer()
     if metrics is None:
         metrics = ["accuracy"]
 
@@ -87,11 +89,7 @@ def local_fit(
     model.set_weights(global_model_weights)
     history = model.fit(x_train, y_train, epochs=epochs).history
     model_weights = np.asarray(model.get_weights(), dtype=object)
-    write_status("Finished training the model.")
-    # history = {"accuracy": [0.9], "loss": [3.14]}
-    # model_weights = global_model_weights
 
-    # Return the updated weights and number of samples the model was trained on
     write_status("Preparing to transfer data back to the controller.")
     data = {
         "endpoint_name": endpoint_name,
@@ -103,9 +101,9 @@ def local_fit(
         "data_transfer_size": float(0),
         "start_transfer_time": time.time()
     }
-    data["data_transfer_size"] = sys.getsizeof(pickle.dumps(data))
+    data["data_transfer_size"] = sys.getsizeof(fxs.serialize(data))
 
-    if data["data_transfer_size"] > FUNCX_SIZE_LIMIT:
+    if not use_proxystore and sys.getsizeof(fxs.serialize(data)) > FUNCX_SIZE_LIMIT:
         write_status("funcX size limit EXCEEDED for return")
         return None
     else:

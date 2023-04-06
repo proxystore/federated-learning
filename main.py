@@ -127,47 +127,51 @@ def main(args: argparse.Namespace) -> None:
     train_fn_uuid = fxe.register_function(local_fit)
 
     result_list = []
+    n_trials = 3
+    timestamp = datetime.datetime.now().isoformat().replace("T", "_")
     for store_key, store_args in get_store_iters(args).items():
         for nhl in [1, 25, 50, 75, 100]:
-            model = create_model(
-                input_shape,
-                n_hidden_layers=nhl,
-                n_classes=10,
-                optimizer="adam",
-                loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
-                metrics=["accuracy"]
-            )
+            # for nhl in [1, 10, 20, 30, 40, 50, 60, 70, 80, 100]:
+            for _ in range(n_trials):
+                model = create_model(
+                    input_shape,
+                    n_hidden_layers=nhl,
+                    n_classes=10,
+                    optimizer="adam",
+                    loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
+                    metrics=["accuracy"]
+                )
 
-            # Start the FL loop.
-            results = federated_fit(
-                fxe=fxe,
-                train_fn_uuid=train_fn_uuid,
-                global_model=model,  # .to_json(),
-                endpoints=endpoints,
-                endpoint_kind=endpoint_kind,
-                num_samples=args.samples,
-                epochs=args.epochs,
-                loops=args.loops,
-                time_interval=args.time_interval,
-                keras_dataset=args.data_name,
-                preprocess=False,
-                input_shape=input_shape,  # (32, 32, 32, 3),
-                optimizer="adam",
-                metrics=["accuracy"],
-                x_test=x_test,
-                y_test=y_test,
-                use_proxystore=store_args["use_proxystore"],  # Store arguments
-                store_name=store_args["store_name"],
-                proxystore_dir=store_args["proxystore_dir"],
-            )
-            results["num_hidden_layers"] = nhl
-            results["store"] = store_key
-            result_list.append(results)
-            logging.info(f"(# hidden layers = {nhl}) Received training results:\n{results}")
+                # Start the FL loop.
+                results = federated_fit(
+                    fxe=fxe,
+                    train_fn_uuid=train_fn_uuid,
+                    global_model=model,  # .to_json(),
+                    endpoints=endpoints,
+                    endpoint_kind=endpoint_kind,
+                    num_samples=args.samples,
+                    epochs=args.epochs,
+                    loops=args.loops,
+                    time_interval=args.time_interval,
+                    keras_dataset=args.data_name,
+                    preprocess=False,
+                    input_shape=input_shape,  # (32, 32, 32, 3),
+                    optimizer="adam",
+                    metrics=["accuracy"],
+                    x_test=x_test,
+                    y_test=y_test,
+                    use_proxystore=store_args["use_proxystore"],  # Store arguments
+                    store_name=store_args["store_name"],
+                    proxystore_dir=store_args["proxystore_dir"],
+                )
+                results["num_hidden_layers"] = nhl
+                results["store"] = store_key
+                result_list.append(results)
+                logging.info(f"(# hidden layers = {nhl}) Received training results:\n{results}")
 
-    data = pd.concat(result_list)
-    timestamp = datetime.datetime.now().isoformat().replace("T", "_")
-    data.to_csv(Path(f"out/data/results_{timestamp}.csv"), index=False)
+        data = pd.concat(result_list)
+        data.to_csv(Path(f"out/data/results_{timestamp}.csv"), index=False)
+
     fxe.shutdown()
 
 
