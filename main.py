@@ -1,5 +1,4 @@
 import argparse
-import caffeine
 import datetime
 import numpy as np
 import pandas as pd
@@ -71,12 +70,12 @@ def create_model(
 def get_store_iters(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
     metrics = False
     store_args = {
-        # "no_store": {
-        #     "use_proxystore": False,
-        #     "store_name": None,
-        #     "proxystore_dir": None,
-        #     "metrics": metrics,
-        # },
+        "no_store": {
+            "use_proxystore": False,
+            "store_name": None,
+            "proxystore_dir": None,
+            "metrics": metrics,
+        },
         "proxystore": {
             "use_proxystore": True,
             "store_name": args.store_name,
@@ -181,6 +180,4 @@ def main(args: argparse.Namespace) -> None:
 
 
 if __name__ == '__main__':
-    caffeine.on(display=False)
     main(get_args())
-    caffeine.off()

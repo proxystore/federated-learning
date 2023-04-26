@@ -1,1 +1,7 @@
-- local:0
+controller:
+  funcx-id: ~
+  proxystore-id: e93c86b3-b358-47f1-9e69-f56e3678450d
+
+worker:
+  funcx-id: 67d76484-c4f7-4028-9b02-a71406c48148
+  proxystore-id: e93c86b3-b358-47f1-9e69-f56e3678450d

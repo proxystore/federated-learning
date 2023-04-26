@@ -37,38 +37,45 @@ endpn===|train/test|datan
 
 ***
 
-### TODO:
+## Install
 
-- [ ] Look into the using
-  the [EndpointConnector](https://docs.proxystore.dev/main/guides/endpoints/#endpointconnector) for orchestrating
-  proxy transfer across all endpoints. Greg suggests to use the `EndpointConnector`.
-- [ ] Polish the current code to be more somewhat legible.
-- [ ] Implement a more complex model (loosely based on MobileNet but for CIFAR-10). We want a more complex model to
-  make the data transfer improvements maybe a bit more interesting.
-- [ ] Move from `RedisStore` to `EndpointStore`.
-
-### NOTES:
-
-- Batch size on the raspberry pis (they're v3) needs to be very small (i.e., `1`).
-
-### ProxyStore Notes:
-
-- Proxystore-Endpoint notes: https://docs.proxystore.dev/main/guides/endpoints/
-- Greg sent:
-
-> This is the relay server address that is used with the ProxyStore-Endpoint CLI:
-> - wss://relay.proxystore.dev
->
-> FuncX client:
-> https://github.com/proxystore/benchmarks/blob/main/psbench/benchmarks/funcx_tasks/main.py
-> FuncX task:
-> https://github.com/proxystore/benchmarks/blob/a157bfad270a9cf7d9fe2cc38f6f9d434d8de48d/psbench/tasks/pong.py#L74
->
-> `proxystore-endpoint configure my-endpoint --relay-server wss://relay.proxystore.dev`
->
-> (Every note can have the same name, they'll get their own unique uuids.)
-
-To use one of the RPI endpoints, you need to start the `proxystore-endpoint` so it that the `EndpointConnector` for data transfer can work. To do this, run the following in the terminal of the logged in node:
+Install the dependencies on the controller/client (e.g., your personal workstation).
+```bash
+python -m venv venv
+. venv/bin/activate
+pip install -r requirements.txt
 ```
-proxystore-endpoint start flox
-```
+
+### Configure the test bed devices.
+
+Repeat the following for each of the training "edge" devices.
+* Install the Python packages as done above on the controller.
+* Start a FuncX endpoint and record the UUID.
+  ```bash
+  $ funcx-endpoint configure fl
+  $ funcx-endpoint start fl
+  ```
+* Start a ProxyStore endpoint and record the UUID.
+  ```bash
+  $ proxystore-endpoint configure fl --relay-server <relay-server-address>
+  $ proxystore-endpoint start fl
+  ```
+
+On the controller, create a config file with all of the FuncX and ProxyStore endpoint UUIDs.
+See `configs/workstation-endpoints.yml` for an example.
+Note that the "controller" endpoint will not have a FuncX endpoint and the "controller" is the local device (e.g., your laptop) running the `main.py` script.
+
+## Run
+
+1. Run the training locally without ProxyStore.
+   ```bash
+   $ python main.py --endpoints configs/workstation-endpoints.yml --no-proxystore --data-name mnist
+   ```
+2. Run with ProxyStore.
+   ```bash
+   $ python main.py --endpoints configs/workstation-endpoints.yml --data-name mnist
+   ```
+
+The script will iterate over many different configurations including with and without ProxyStore, different models sizes, and number of trials.
+These parameters can be edited in `main.py`.
+The workflow will output a file `out/data/results_{timestamp}.csv` with metrics collected from the runs.
