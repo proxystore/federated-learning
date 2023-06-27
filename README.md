@@ -1,5 +1,7 @@
 # ProxyFloxy: A simple use case of Federated Learning on top of data decoupling with ProxyStore
 
+[![DOI](https://zenodo.org/badge/624906583.svg)](https://zenodo.org/badge/latestdoi/624906583)
+
 This repo is a simple app that modifies the `FLoX-v0.1.0` code base to incorporate ProxyStore as a data transfer
 protocol.
 
